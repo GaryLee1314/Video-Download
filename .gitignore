@@ -14,6 +14,14 @@ temp_cookies.txt
 ig_dump.json
 dvgj.html
 cookies.txt
+douyin_cookie_str.txt
+douyin_cookies_netscape.txt
+default_nginx.conf
+package.tar.gz
+cat_output.png
+*.lnk
+patch*.py
+res.log
 
 # 测试脚本
 test_*.py

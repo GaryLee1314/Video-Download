@@ -6,24 +6,38 @@ VideoSnap 是一款高度优化的全平台短视频极速提取网络应用。�
 
 ## ✨ 核心特性
 
-- **极致毛玻璃拟态 UI (V5 终极极简版)**：剔除全部杂乱的组件，界面仅有距离顶部 1/5 处悬置的搜索胶囊舱，呈现全视口径向渐变星空呼吸感。适配全部移动端设备完美压缩。
-- **混合验证隧道机制 (Client Tunnel)**：针对 Instagram 等高危风控拦截环境，创新接入客户端原生流量跨环境代理隧道，确保零风控 100% 下载。
-- **One-Input 智能全网分发**：支持 YouTube、Instagram、X (Twitter)、Facebook 及 TikTok。粘贴即可，无需手动切换或声明平台来源。
-- **纯粹跨域下载剥离**：使用流式缓冲双协议降维应对了严格平台的媒体直链 Referer 阻隔，一键完美落地。
+- **极致毛玻璃拟态 UI**：V5 终极版，界面仅保留悬浮搜索胶囊，极简径向星空背景。适配移动端及现代浏览器。
+- **Cloudflare + Nginx 二级网路代理**：结合 Cloudflare 边缘加速与 Nginx 本地转发，保障生产环境稳定。
+- **One-Input 智能全网分发**：无感提取 YouTube、Instagram、X (Twitter)、Facebook 及 TikTok 视频。
+- **速率限制 (Rate Limiting)**：内置每人每天 3 次搜索的限流策略，通过 `CF-Connecting-IP` 精准识别，保护服务器资源。
+- **零缓冲流式加速**：应用 `X-Accel-Buffering: no` 及 Nginx 缓冲禁用法，实现大文件点对点极致透传，减少等待延迟。
 
-## 🚀 启动指北
+## 🚀 启动与部署
 
-本项目使用 `uv` 部署与依赖执行。
+本项目使用 `uv` 进行统一管理。
 
-1. **环境准备**  
-   使用 uv 同步锁配置安装系统依赖：
-   ```bash
-   uv sync
+### 本地开发
+```bash
+uv sync
+uv run python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+### 生产部署 (Oracle Cloud / Ubuntu)
+1. **安装 Nginx** 并配置反向代理：
+   ```nginx
+   server {
+       listen 80;
+       location / {
+           proxy_pass http://127.0.0.1:8000;
+           proxy_buffering off;
+           proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+       }
+   }
    ```
-2. **启动本地服务器**  
-   这将会部署拥有跨端访问控制（CORS）特权的全功能 FastAPI：
-   ```bash
-   uv run uvicorn main:app --host 127.0.0.1 --port 8000 --reload
-   ```
-3. **享受提取**  
-   打开 [http://127.0.0.1:8000](http://127.0.0.1:8000) ，开始你的极速体验。
+2. **连接 Cloudflare** 并设置为“Flexible (灵活)” SSL 模式。
+3. **环境变量**：确保安装了 `static-ffmpeg` 依赖或系统中已存在 ffmpeg。
+4. **YouTube 后备**：若在数据中心 IP 被拦截，项目会自动切换至 `cobalt.tools` 提供的后备 API 方案。
+
+---
+
+> 该项目仅供学习交流使用，请勿用于任何非法用途。

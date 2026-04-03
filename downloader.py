@@ -1,10 +1,8 @@
 import yt_dlp
 import logging
 import requests
-import httpx
 import re
 import os
-from urllib.parse import unquote
 
 def strip_ansi(text: str) -> str:
     """清理 yt-dlp 等命令行工具输出中的 ANSI 颜色控制序列"""
@@ -24,6 +22,7 @@ def get_cookie_opts() -> dict:
     else:
         logger.info("[Cookies] cookies.txt 不存在，跳过 cookies 配置")
         return {}
+
 
 
 
@@ -283,6 +282,12 @@ def extract_video_info(url: str, platform: str) -> dict:
         'no_warnings': True,
         **get_cookie_opts(),  # 注入 cookies 配置（解决 YouTube 机器人检测）
     }
+
+
+    # 针对 YouTube 进行网络保护，挂载本地 WARP SOCKS5 代理隧道避开云平台 IP 检测
+    if platform == 'youtube':
+        ydl_opts['proxy'] = 'socks5://127.0.0.1:40000'
+
 
 
     try:

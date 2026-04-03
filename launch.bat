@@ -1,5 +1,5 @@
 @echo off
-cd /d D:\WorFlow\AntiGravity
+cd /d D:\WorFlow\AntiGravity\Video Download
 
 :: 检查本地 8001 端口是否已经提供服务 (避免重复启动导致端口占用崩溃)
 netstat -ano | findstr :8001 >nul

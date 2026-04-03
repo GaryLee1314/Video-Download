@@ -2,19 +2,64 @@ import static_ffmpeg
 static_ffmpeg.add_paths()
 from static_ffmpeg.run import get_or_fetch_platform_executables_else_raise
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi.background import BackgroundTasks
 from pydantic import BaseModel
 import os
 import httpx
+import urllib.parse
+import tempfile
+import shutil
+import asyncio
+import subprocess
 from downloader import extract_video_info
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 app = FastAPI(title="Video Downloader API")
 
-# 挂载静态资源目录
+def get_real_ip(request: Request) -> str:
+    """获取穿透代理后的真实 IP"""
+    # 优先从 Cloudflare 特有头读取
+    cf_ip = request.headers.get("cf-connecting-ip")
+    if cf_ip:
+        return cf_ip
+    # 其次从标准代理头读取
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "127.0.0.1"
+
+# 使用自定义的获取真实 IP 的函数
+limiter = Limiter(key_func=get_real_ip)
+app.state.limiter = limiter
+
+@app.exception_handler(RateLimitExceeded)
+async def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"success": False, "error": "今天的 3 次提取配额满啦~ 设置限额是为了把服务器资源留给真正需要的人。如果您有更多的下载需求或灵感碰撞，随时欢迎给我写信：li923745997@gmail.com"}
+    )
+
+# 静态资源目录（不使用 StaticFiles mount，因为其底层 sendfile 在 Oracle ARM 实例上对大文件传输不兼容）
 os.makedirs("static", exist_ok=True)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+import mimetypes
+
+@app.get("/static/{file_path:path}")
+def serve_static(file_path: str):
+    """手动读取静态文件内容并返回，绕过 sendfile 系统调用兼容性问题"""
+    full_path = os.path.join("static", file_path)
+    if not os.path.isfile(full_path):
+        raise HTTPException(status_code=404, detail="Static file not found")
+    with open(full_path, "rb") as f:
+        content = f.read()
+    media_type, _ = mimetypes.guess_type(full_path)
+    if not media_type:
+        media_type = "application/octet-stream"
+    return Response(content=content, media_type=media_type)
 
 from typing import Optional
 
@@ -27,29 +72,36 @@ async def root():
     return FileResponse("static/index.html")
 
 @app.post("/api/extract")
-async def extract_video(request: ExtractRequest):
-    if not request.url:
+@limiter.limit("3/day")
+async def extract_video(body: ExtractRequest, request: Request):
+    if not body.url:
         raise HTTPException(status_code=400, detail="Missing url")
         
-    url = request.url.lower()
+    url = body.url.lower()
     detected_platform = None
     
-    if 'youtube.com' in url or 'youtu.be' in url:
+    try:
+        parsed_url = urllib.parse.urlparse(url)
+        domain = parsed_url.netloc
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid URL format")
+    
+    if domain.endswith('youtube.com') or domain.endswith('youtu.be'):
         detected_platform = 'youtube'
-    elif 'instagram.com' in url:
+    elif domain.endswith('instagram.com'):
         detected_platform = 'instagram'
-    elif 'facebook.com' in url or 'fb.watch' in url or 'fb.com' in url:
+    elif domain.endswith('facebook.com') or domain.endswith('fb.watch') or domain.endswith('fb.com'):
         detected_platform = 'facebook'
-    elif 'tiktok.com' in url:
+    elif domain.endswith('tiktok.com'):
         detected_platform = 'tiktok'
-    elif 'x.com' in url or 'twitter.com' in url:
+    elif domain.endswith('x.com') or domain.endswith('twitter.com'):
         detected_platform = 'twitter'
         
     if not detected_platform:
         raise HTTPException(status_code=400, detail="Unsupported URL. Only YouTube, Instagram, Facebook, TikTok, and X (Twitter) are supported.")
         
     # 调用 yt-dlp/特定API 封装提取视频信息
-    result = extract_video_info(request.url, detected_platform)
+    result = extract_video_info(body.url, detected_platform)
     
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error", "Unknown error extracting video"))
@@ -110,7 +162,8 @@ async def download_video(url: str, ext: str = "mp4"):
     media_type = "video/mp4" if ext == "mp4" else f"audio/{ext}" if ext in ["m4a", "mp3"] else "application/octet-stream"
                     
     return StreamingResponse(iterfile(), media_type=media_type, headers={
-        "Content-Disposition": f"attachment; filename=\"downloaded_file.{ext}\""
+        "Content-Disposition": f"attachment; filename=\"downloaded_file.{ext}\"",
+        "X-Accel-Buffering": "no"
     })
 
 @app.get("/api/proxy_image")
@@ -152,7 +205,6 @@ async def proxy_image(url: str):
         content = response.content
         await client.aclose()
         
-        from fastapi import Response
         return Response(content=content, media_type=content_type, headers={
             "Cache-Control": "public, max-age=86400"
         })
@@ -160,12 +212,6 @@ async def proxy_image(url: str):
     except Exception as e:
         await client.aclose()
         raise HTTPException(status_code=404, detail="Proxy image failed")
-
-import tempfile
-import shutil
-import asyncio
-import subprocess
-from fastapi.background import BackgroundTasks
 
 @app.get("/api/download_merged")
 def download_merged_video(url: str, format_id: str, background_tasks: BackgroundTasks):
@@ -191,6 +237,11 @@ def download_merged_video(url: str, format_id: str, background_tasks: Background
         "--ffmpeg-location", ffmpeg_exe,
         "-o", out_path,
     ]
+    
+    # 强制将下载流体的外发流量推入代理隧道，避免传输大文件时遭阻击
+    if 'youtube.com' in url.lower() or 'youtu.be' in url.lower():
+        cmd.extend(["--proxy", "socks5://127.0.0.1:40000"])
+        
     # 添加 cookies 参数（如果有 cookies.txt 文件就使用，没有就跳过）
     if os.path.exists(cookies_file):
         cmd.extend(["--cookies", cookies_file])
@@ -223,7 +274,10 @@ def download_merged_video(url: str, format_id: str, background_tasks: Background
     return FileResponse(
         out_path, 
         media_type="video/mp4", 
-        headers={"Content-Disposition": "attachment; filename=\"downloaded_merged_video.mp4\""}
+        headers={
+            "Content-Disposition": "attachment; filename=\"downloaded_merged_video.mp4\"",
+            "X-Accel-Buffering": "no"
+        }
     )
 
 if __name__ == "__main__":
