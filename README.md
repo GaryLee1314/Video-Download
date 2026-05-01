@@ -9,7 +9,7 @@ VideoSnap 是一款高度优化的全平台短视频极速提取网络应用。�
 - **极致毛玻璃拟态 UI**：V5 终极版，界面仅保留悬浮搜索胶囊，极简径向星空背景。适配移动端及现代浏览器。
 - **Cloudflare + Nginx 二级网路代理**：结合 Cloudflare 边缘加速与 Nginx 本地转发，保障生产环境稳定。
 - **One-Input 智能全网分发**：无感提取 YouTube、Instagram、X (Twitter)、Facebook 及 TikTok 视频。
-- **速率限制 (Rate Limiting)**：内置每人每天 3 次搜索的限流策略，通过 `CF-Connecting-IP` 精准识别，保护服务器资源。
+- **速率限制 (Rate Limiting)**：内置每人每天 5 次搜索的限流策略，通过 `CF-Connecting-IP` 精准识别，保护服务器资源。
 - **零缓冲流式加速**：应用 `X-Accel-Buffering: no` 及 Nginx 缓冲禁用法，实现大文件点对点极致透传，减少等待延迟。
 
 ## 🚀 启动与部署

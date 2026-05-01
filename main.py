@@ -41,7 +41,7 @@ app.state.limiter = limiter
 async def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
     return JSONResponse(
         status_code=429,
-        content={"success": False, "error": "今天的 3 次提取配额满啦~ 设置限额是为了把服务器资源留给真正需要的人。如果您有更多的下载需求或灵感碰撞，随时欢迎给我写信：li923745997@gmail.com"}
+        content={"success": False, "error": "今天的 5 次提取配额满啦~ 设置限额是为了把服务器资源留给真正需要的人。如果您有更多的下载需求或灵感碰撞，随时欢迎给我写信：li923745997@gmail.com"}
     )
 
 # 静态资源目录（不使用 StaticFiles mount，因为其底层 sendfile 在 Oracle ARM 实例上对大文件传输不兼容）
@@ -72,7 +72,7 @@ async def root():
     return FileResponse("static/index.html")
 
 @app.post("/api/extract")
-@limiter.limit("3/day")
+@limiter.limit("5/day")
 async def extract_video(body: ExtractRequest, request: Request):
     if not body.url:
         raise HTTPException(status_code=400, detail="Missing url")
