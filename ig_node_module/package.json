@@ -12,6 +12,7 @@
   "type": "commonjs",
   "dependencies": {
     "instagram-url-direct": "^2.0.7",
-    "puppeteer": "^24.37.5"
+    "puppeteer": "^24.37.5",
+    "socks-proxy-agent": "^8.0.5"
   }
 }

@@ -1,0 +1,25 @@
+[Unit]
+Description=VideoSnap FastAPI Backend
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/li923745997/videosnap
+Environment=PATH=/home/li923745997/.local/bin:/home/li923745997/.local/node/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/li923745997
+Environment=ACCESS_CODE=hua
+Environment=DAILY_DOWNLOAD_LIMIT=5
+Environment=MAX_DOWNLOAD_BYTES=314572800
+Environment=MERGE_CONCURRENCY=1
+Environment=MERGE_TIMEOUT_SECONDS=180
+ExecStart=/home/li923745997/.local/bin/uv run uvicorn main:app --host 127.0.0.1 --port 8002 --no-access-log --log-level warning
+Restart=always
+RestartSec=5
+SuccessExitStatus=143
+MemoryMax=700M
+CPUQuota=80%
+TasksMax=80
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

@@ -168,11 +168,94 @@ document.addEventListener('DOMContentLoaded', () => {
         errorMessage.textContent = msg;
         errorMessage.style.display = 'block';
     }
+    const ACCESS_CODE_STORAGE_KEY = 'videosnapAccessCode';
+
+    function saveAccessCode(code) {
+        localStorage.setItem(ACCESS_CODE_STORAGE_KEY, code);
+        document.cookie = `access_code=${encodeURIComponent(code)}; Path=/; SameSite=Lax; Max-Age=2592000`;
+    }
+
+    function clearAccessCode() {
+        localStorage.removeItem(ACCESS_CODE_STORAGE_KEY);
+        document.cookie = 'access_code=; Path=/; SameSite=Lax; Max-Age=0';
+    }
+
+    function requestAccessCode(message = '') {
+        return new Promise((resolve) => {
+            const existing = document.querySelector('.access-code-overlay');
+            if (existing) existing.remove();
+
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay access-code-overlay active';
+            overlay.innerHTML = `
+                <div class="donate-modal access-code-modal">
+                    <h3>Access Code Required</h3>
+                    <p class="access-code-help">
+                        Donate any amount, then contact
+                        <a href="mailto:li923745997@gmail.com">li923745997@gmail.com</a>
+                        to get an access code.
+                    </p>
+                    ${message ? `<div class="access-code-error">${message}</div>` : ''}
+                    <input class="access-code-input" type="password" placeholder="Enter access code" autocomplete="off">
+                    <button class="copy-btn access-code-submit">Continue Download</button>
+                    <button class="close-modal access-code-cancel">Cancel</button>
+                </div>
+            `;
+
+            const input = overlay.querySelector('.access-code-input');
+            const submit = overlay.querySelector('.access-code-submit');
+            const cancel = overlay.querySelector('.access-code-cancel');
+
+            function close(value) {
+                overlay.remove();
+                resolve(value);
+            }
+
+            submit.addEventListener('click', () => {
+                const code = input.value.trim();
+                if (!code) return;
+                saveAccessCode(code);
+                close(code);
+            });
+            cancel.addEventListener('click', () => close(null));
+            overlay.addEventListener('click', (event) => {
+                if (event.target === overlay) close(null);
+            });
+            input.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') submit.click();
+                if (event.key === 'Escape') close(null);
+            });
+
+            document.body.appendChild(overlay);
+            input.focus();
+        });
+    }
+
+    async function getAccessCode() {
+        const saved = localStorage.getItem(ACCESS_CODE_STORAGE_KEY);
+        if (saved) {
+            saveAccessCode(saved);
+            return saved;
+        }
+        return requestAccessCode();
+    }
+
+    async function readError(response) {
+        try {
+            const data = await response.json();
+            return data.detail || data.error || 'Download failed.';
+        } catch {
+            return 'Download failed.';
+        }
+    }
     /**
      * 实现彻底跨域下载，避免使用a标签引起浏览器无响应，并在失败时fallback到浏览器播放
      */
     window.forceDownload = async function (directUrl, ext, needsMerge, formatId, origUrl, btnElement) {
         const originalText = btnElement.innerText;
+        const accessCode = await getAccessCode();
+        if (!accessCode) return;
+
         btnElement.innerText = "Downloading...";
         btnElement.style.pointerEvents = "none";
         btnElement.style.opacity = "0.7";
@@ -183,14 +266,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 apiEndpoint = '/api/download_merged?url=' + encodeURIComponent(origUrl) + '&format_id=' + encodeURIComponent(formatId);
             }
 
-            const response = await fetch(apiEndpoint);
+            const response = await fetch(apiEndpoint, { headers: { 'X-Access-Code': accessCode } });
             if (!response.ok) {
-                if (!needsMerge && directUrl) {
-                    window.open(directUrl, '_blank');
-                    throw new Error("Proxy error, opening in new tab");
-                } else {
-                    throw new Error("Server Merge Failed");
+                const message = await readError(response);
+                if (response.status === 401) {
+                    clearAccessCode();
                 }
+                throw new Error(message);
             }
             const blob = await response.blob();
             const objectUrl = URL.createObjectURL(blob);
@@ -203,6 +285,7 @@ document.addEventListener('DOMContentLoaded', () => {
             URL.revokeObjectURL(objectUrl);
         } catch (err) {
             console.warn(err);
+            showError(err.message || 'Download failed.');
         } finally {
             btnElement.innerText = originalText;
             btnElement.style.pointerEvents = "auto";

@@ -8,18 +8,39 @@ from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.background import BackgroundTasks
 from pydantic import BaseModel
 import os
+import hmac
 import httpx
 import urllib.parse
 import tempfile
 import shutil
 import asyncio
 import subprocess
-from downloader import extract_video_info
+import threading
+import time
+import socket
+import logging
+from downloader import extract_video_info, strip_ansi
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 app = FastAPI(title="Video Downloader API")
+logger = logging.getLogger(__name__)
+
+ACCESS_CODE = os.getenv("ACCESS_CODE", "hua").strip()
+DAILY_DOWNLOAD_LIMIT = int(os.getenv("DAILY_DOWNLOAD_LIMIT", "5"))
+MAX_DOWNLOAD_BYTES = int(os.getenv("MAX_DOWNLOAD_BYTES", str(300 * 1024 * 1024)))
+MERGE_TIMEOUT_SECONDS = int(os.getenv("MERGE_TIMEOUT_SECONDS", "180"))
+download_counter_lock = threading.Lock()
+download_counter: dict[tuple[str, str], int] = {}
+merge_semaphore = threading.BoundedSemaphore(int(os.getenv("MERGE_CONCURRENCY", "1")))
+
+def is_local_port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.25) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 def get_real_ip(request: Request) -> str:
     """获取穿透代理后的真实 IP"""
@@ -32,6 +53,39 @@ def get_real_ip(request: Request) -> str:
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "127.0.0.1"
+
+def require_access_code(request: Request) -> None:
+    provided = (
+        request.headers.get("x-access-code")
+        or request.cookies.get("access_code")
+        or request.query_params.get("access_code")
+        or ""
+    ).strip()
+    if not ACCESS_CODE or not hmac.compare_digest(provided, ACCESS_CODE):
+        raise HTTPException(status_code=401, detail="Invalid access code.")
+
+def today_key() -> str:
+    return time.strftime("%Y-%m-%d", time.localtime())
+
+def reserve_download_quota(request: Request) -> None:
+    ip = get_real_ip(request)
+    key = (ip, today_key())
+    with download_counter_lock:
+        used = download_counter.get(key, 0)
+        if used >= DAILY_DOWNLOAD_LIMIT:
+            raise HTTPException(status_code=429, detail=f"Daily download limit reached. Each IP can download {DAILY_DOWNLOAD_LIMIT} files per day.")
+        download_counter[key] = used + 1
+
+def enforce_known_size(headers) -> None:
+    raw_size = headers.get("content-length") or headers.get("Content-Length")
+    if not raw_size:
+        return
+    try:
+        size = int(raw_size)
+    except ValueError:
+        return
+    if size > MAX_DOWNLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File is larger than the 300 MB limit.")
 
 # 使用自定义的获取真实 IP 的函数
 limiter = Limiter(key_func=get_real_ip)
@@ -72,7 +126,6 @@ async def root():
     return FileResponse("static/index.html")
 
 @app.post("/api/extract")
-@limiter.limit("5/day")
 async def extract_video(body: ExtractRequest, request: Request):
     if not body.url:
         raise HTTPException(status_code=400, detail="Missing url")
@@ -109,10 +162,11 @@ async def extract_video(body: ExtractRequest, request: Request):
     return result
 
 @app.get("/api/download")
-async def download_video(url: str, ext: str = "mp4"):
+async def download_video(request: Request, url: str, ext: str = "mp4"):
     """
     通过流式代理解决跨域双击或只能在新标签页打开不能直接下载的问题
     """
+    require_access_code(request)
     if not url:
         raise HTTPException(status_code=400, detail="Missing url")
         
@@ -140,20 +194,32 @@ async def download_video(url: str, ext: str = "mp4"):
     
     client = httpx.AsyncClient(follow_redirects=True, headers=proxy_headers, timeout=60.0)
     
-    request = client.build_request("GET", url)
+    upstream_request = client.build_request("GET", url)
     try:
-        response = await client.send(request, stream=True)
+        response = await client.send(upstream_request, stream=True)
         if response.status_code not in (200, 206):
             await response.aclose()
             await client.aclose()
             raise HTTPException(status_code=400, detail="Forbidden or Error from upstream")
+        try:
+            enforce_known_size(response.headers)
+        except HTTPException:
+            await response.aclose()
+            await client.aclose()
+            raise
     except Exception as e:
         await client.aclose()
+        if isinstance(e, HTTPException):
+            raise
         raise HTTPException(status_code=400, detail=str(e))
         
     async def iterfile():
+        bytes_sent = 0
         try:
             async for chunk in response.aiter_bytes(chunk_size=65536):
+                bytes_sent += len(chunk)
+                if bytes_sent > MAX_DOWNLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="File is larger than the 300 MB limit.")
                 yield chunk
         finally:
             await response.aclose()
@@ -161,6 +227,7 @@ async def download_video(url: str, ext: str = "mp4"):
             
     media_type = "video/mp4" if ext == "mp4" else f"audio/{ext}" if ext in ["m4a", "mp3"] else "application/octet-stream"
                     
+    reserve_download_quota(request)
     return StreamingResponse(iterfile(), media_type=media_type, headers={
         "Content-Disposition": f"attachment; filename=\"downloaded_file.{ext}\"",
         "X-Accel-Buffering": "no"
@@ -214,16 +281,20 @@ async def proxy_image(url: str):
         raise HTTPException(status_code=404, detail="Proxy image failed")
 
 @app.get("/api/download_merged")
-def download_merged_video(url: str, format_id: str, background_tasks: BackgroundTasks):
+def download_merged_video(request: Request, url: str, format_id: str, background_tasks: BackgroundTasks):
     """
     专门针对高画质（音画分离）视频的服务端合成接口。
     会通过 yt-dlp 拉取并在服务器合并，之后回传给客户端并自动删除。
     """
+    require_access_code(request)
     if not url or not format_id:
         raise HTTPException(status_code=400, detail="Missing url or format_id")
+    if not merge_semaphore.acquire(blocking=False):
+        raise HTTPException(status_code=429, detail="Another merge is already running. Please try again in a few minutes.")
         
     temp_dir = tempfile.mkdtemp(prefix="video_merge_")
     out_path = os.path.join(temp_dir, "video.mp4")
+    release_in_background = False
     
     # 寻找 ffmpeg 的具体路径
     ffmpeg_exe, _ = get_or_fetch_platform_executables_else_raise()
@@ -240,7 +311,8 @@ def download_merged_video(url: str, format_id: str, background_tasks: Background
     
     # 强制将下载流体的外发流量推入代理隧道，避免传输大文件时遭阻击
     if 'youtube.com' in url.lower() or 'youtu.be' in url.lower():
-        cmd.extend(["--proxy", "socks5://127.0.0.1:40000"])
+        if is_local_port_open(40000):
+            cmd.extend(["--proxy", "socks5://127.0.0.1:40000"])
         
     # 添加 cookies 参数（如果有 cookies.txt 文件就使用，没有就跳过）
     if os.path.exists(cookies_file):
@@ -248,11 +320,18 @@ def download_merged_video(url: str, format_id: str, background_tasks: Background
     cmd.append(url)
     
     # 在 FastAPI 默认的同步路由中，代码会自动抛到线程池执行，不会阻塞主线程！
-    process = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        process = subprocess.run(cmd, capture_output=True, text=True, timeout=MERGE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        merge_semaphore.release()
+        raise HTTPException(status_code=504, detail="Merge timed out after 3 minutes.")
     
     if process.returncode != 0:
         # 合成失败时清理
+        logger.warning("Merge failed for url=%s format_id=%s stderr=%s", url, format_id, strip_ansi(process.stderr)[-2000:])
         shutil.rmtree(temp_dir, ignore_errors=True)
+        merge_semaphore.release()
         raise HTTPException(status_code=500, detail=f"Merge failed on server: {process.stderr}")
         
     # 如果找不到预期的输出文件
@@ -263,13 +342,25 @@ def download_merged_video(url: str, format_id: str, background_tasks: Background
             out_path = os.path.join(temp_dir, files[0])
         else:
             shutil.rmtree(temp_dir, ignore_errors=True)
+            merge_semaphore.release()
             raise HTTPException(status_code=500, detail="Merged file not found on server")
 
     # 分配后台任务去删除临时目录
-    def cleanup_temp_dir():
+    if os.path.getsize(out_path) > MAX_DOWNLOAD_BYTES:
         shutil.rmtree(temp_dir, ignore_errors=True)
+        merge_semaphore.release()
+        raise HTTPException(status_code=413, detail="File is larger than the 300 MB limit.")
+
+    reserve_download_quota(request)
+
+    def cleanup_temp_dir():
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        finally:
+            merge_semaphore.release()
         
     background_tasks.add_task(cleanup_temp_dir)
+    release_in_background = True
     
     return FileResponse(
         out_path, 

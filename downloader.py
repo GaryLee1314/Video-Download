@@ -3,13 +3,21 @@ import logging
 import requests
 import re
 import os
+import socket
 
 def strip_ansi(text: str) -> str:
     """清理 yt-dlp 等命令行工具输出中的 ANSI 颜色控制序列"""
     return re.sub(r'\x1b\[[0-9;]*m', '', text)
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=getattr(logging, os.getenv("LOG_LEVEL", "WARNING").upper(), logging.WARNING))
 logger = logging.getLogger(__name__)
+
+def is_local_port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.25) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 # cookies 文件路径（优先使用文件，其次从浏览器读取）
 COOKIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cookies.txt')
@@ -286,7 +294,10 @@ def extract_video_info(url: str, platform: str) -> dict:
 
     # 针对 YouTube 进行网络保护，挂载本地 WARP SOCKS5 代理隧道避开云平台 IP 检测
     if platform == 'youtube':
-        ydl_opts['proxy'] = 'socks5://127.0.0.1:40000'
+        if is_local_port_open(40000):
+            ydl_opts['proxy'] = 'socks5://127.0.0.1:40000'
+        else:
+            logger.warning("[YouTube] Local SOCKS proxy 127.0.0.1:40000 is not available; trying direct connection")
 
 
 
@@ -308,8 +319,6 @@ def extract_video_info(url: str, platform: str) -> dict:
             final_thumb = raw_thumb if raw_thumb else ''
             
             # 调试日志：追踪缩略图提取情况
-            logger.info(f"[DEBUG-THUMB] platform={platform}, raw_thumb={raw_thumb}, final_thumb={final_thumb}")
-            logger.info(f"[DEBUG-THUMB] thumbnails_list={info_dict.get('thumbnails')}")
 
             result = {
                 "success": True,

@@ -318,6 +318,148 @@ main {
     color: #fff;
 }
 
+/* Donate Button & Modal */
+.donate-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-muted);
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+.donate-btn:hover {
+    color: white;
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(217, 70, 239, 0.4);
+}
+
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(5px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+.modal-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+.donate-modal {
+    background: var(--bg-dark);
+    border: 1px solid rgba(217, 70, 239, 0.3);
+    border-radius: 20px;
+    padding: 2rem;
+    width: 90%;
+    max-width: 400px;
+    text-align: center;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    transform: translateY(20px);
+    transition: transform 0.3s ease;
+}
+.modal-overlay.active .donate-modal {
+    transform: translateY(0);
+}
+.donate-modal h3 {
+    margin-bottom: 0.5rem;
+    font-size: 1.5rem;
+}
+.qr-code-box {
+    background: white;
+    padding: 10px;
+    border-radius: 12px;
+    display: inline-block;
+    margin-bottom: 1.5rem;
+}
+.qr-code-box img {
+    width: 180px;
+    height: 180px;
+    display: block;
+}
+.wallet-address {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 12px;
+    border-radius: 10px;
+    font-family: monospace;
+    font-size: 0.9rem;
+    color: #22d3ee;
+    word-break: break-all;
+    margin-bottom: 1rem;
+    border: 1px solid rgba(255,255,255,0.1);
+}
+.copy-btn {
+    background: linear-gradient(to right, #0ea5e9, #a855f7);
+    border: none;
+    padding: 10px 20px;
+    border-radius: 20px;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+    transition: all 0.3s;
+}
+.copy-btn:hover {
+    filter: brightness(1.15);
+}
+.close-modal {
+    margin-top: 15px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+.close-modal:hover {
+    color: white;
+}
+
+.access-code-help {
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    margin: 0.75rem 0 1.25rem;
+}
+
+.access-code-help a {
+    color: #67e8f9;
+    text-decoration: none;
+}
+
+.access-code-help a:hover {
+    text-decoration: underline;
+}
+
+.access-code-input {
+    width: 100%;
+    height: 46px;
+    margin-bottom: 0.9rem;
+    border-radius: 12px;
+    border: 1px solid var(--input-border);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-main);
+    padding: 0 1rem;
+    font-size: 1rem;
+    outline: none;
+}
+
+.access-code-input:focus {
+    border-color: rgba(217, 70, 239, 0.55);
+}
+
+.access-code-error {
+    margin-bottom: 0.8rem;
+    color: #fca5a5;
+    font-size: 0.9rem;
+}
+
 /* Animations */
 @keyframes fadeIn {
     from { opacity: 0; }
@@ -353,6 +495,12 @@ main {
         <header>
             <h1>Paste, Click, <span class="gradient-text">Download</span>.</h1>
             <p>From YouTube, Instagram, X, Tiktok, Facebook.</p>
+            <div style="margin-top: 15px;">
+                <button id="donate-btn" class="donate-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                    Sponsor / Donate
+                </button>
+            </div>
         </header>
 
         <main>
@@ -387,6 +535,23 @@ main {
         </main>
     </div>
 
+    <!-- 赞赏/打赏 Modal -->
+    <div class="modal-overlay" id="donate-modal-overlay">
+        <div class="donate-modal">
+            <h3>Support the Project 💖</h3>
+            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">
+                Buy me a coffee via USDT (TRC-20)
+            </p>
+            <div class="qr-code-box">
+                <!-- 优先读取可能存在的本地图片，若无则使用 API 实时生成 -->
+                <img src="/static/usdt_qr.png" onerror="this.onerror=null; this.src='https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=TFQcyiRDyHtJ32CH4AbvLiKKd1aQT1ibth';" alt="USDT TRC-20 QR Code">
+            </div>
+            <div class="wallet-address" id="wallet-address">TFQcyiRDyHtJ32CH4AbvLiKKd1aQT1ibth</div>
+            <button class="copy-btn" id="copy-wallet-btn">Copy Address</button>
+            <button class="close-modal" id="close-modal-btn">Close</button>
+        </div>
+    </div>
+
     <!-- 内联核心 JS（避免 Oracle ARM 网络层对大静态文件的传输中断问题） -->
     <script>
 /** 
@@ -403,6 +568,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const resultContainer = document.getElementById('result-container');
     const errorMessage = document.getElementById('error-message');
+
+    // Donate Modal Logic
+    const donateBtn = document.getElementById('donate-btn');
+    const modalOverlay = document.getElementById('donate-modal-overlay');
+    const closeModalBtn = document.getElementById('close-modal-btn');
+    const copyWalletBtn = document.getElementById('copy-wallet-btn');
+    const walletAddress = document.getElementById('wallet-address').innerText;
+
+    donateBtn.addEventListener('click', () => {
+        modalOverlay.classList.add('active');
+    });
+
+    closeModalBtn.addEventListener('click', () => {
+        modalOverlay.classList.remove('active');
+        copyWalletBtn.innerText = "Copy Address";
+    });
+
+    modalOverlay.addEventListener('click', (e) => {
+        if(e.target === modalOverlay) {
+            modalOverlay.classList.remove('active');
+            copyWalletBtn.innerText = "Copy Address";
+        }
+    });
+
+    copyWalletBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(walletAddress).then(() => {
+            copyWalletBtn.innerText = "Copied! ✔️";
+            setTimeout(() => {
+                copyWalletBtn.innerText = "Copy Address";
+            }, 2000);
+        });
+    });
 
     // 搜索框焦点事件优化
     urlInput.addEventListener('focus', () => {
@@ -537,11 +734,95 @@ document.addEventListener('DOMContentLoaded', () => {
         errorMessage.style.display = 'block';
     }
 
+    const ACCESS_CODE_STORAGE_KEY = 'videosnapAccessCode';
+
+    function saveAccessCode(code) {
+        localStorage.setItem(ACCESS_CODE_STORAGE_KEY, code);
+        document.cookie = `access_code=${encodeURIComponent(code)}; Path=/; SameSite=Lax; Max-Age=2592000`;
+    }
+
+    function clearAccessCode() {
+        localStorage.removeItem(ACCESS_CODE_STORAGE_KEY);
+        document.cookie = 'access_code=; Path=/; SameSite=Lax; Max-Age=0';
+    }
+
+    function requestAccessCode(message = '') {
+        return new Promise((resolve) => {
+            const existing = document.querySelector('.access-code-overlay');
+            if (existing) existing.remove();
+
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay access-code-overlay active';
+            overlay.innerHTML = `
+                <div class="donate-modal access-code-modal">
+                    <h3>Access Code Required</h3>
+                    <p class="access-code-help">
+                        Donate any amount, then contact
+                        <a href="mailto:li923745997@gmail.com">li923745997@gmail.com</a>
+                        to get an access code.
+                    </p>
+                    ${message ? `<div class="access-code-error">${message}</div>` : ''}
+                    <input class="access-code-input" type="password" placeholder="Enter access code" autocomplete="off">
+                    <button class="copy-btn access-code-submit">Continue Download</button>
+                    <button class="close-modal access-code-cancel">Cancel</button>
+                </div>
+            `;
+
+            const input = overlay.querySelector('.access-code-input');
+            const submit = overlay.querySelector('.access-code-submit');
+            const cancel = overlay.querySelector('.access-code-cancel');
+
+            function close(value) {
+                overlay.remove();
+                resolve(value);
+            }
+
+            submit.addEventListener('click', () => {
+                const code = input.value.trim();
+                if (!code) return;
+                saveAccessCode(code);
+                close(code);
+            });
+            cancel.addEventListener('click', () => close(null));
+            overlay.addEventListener('click', (event) => {
+                if (event.target === overlay) close(null);
+            });
+            input.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') submit.click();
+                if (event.key === 'Escape') close(null);
+            });
+
+            document.body.appendChild(overlay);
+            input.focus();
+        });
+    }
+
+    async function getAccessCode() {
+        const saved = localStorage.getItem(ACCESS_CODE_STORAGE_KEY);
+        if (saved) {
+            saveAccessCode(saved);
+            return saved;
+        }
+        return requestAccessCode();
+    }
+
+    async function readError(response) {
+        try {
+            const data = await response.json();
+            return data.detail || data.error || 'Download failed.';
+        } catch {
+            return 'Download failed.';
+        }
+    }
+
     /**
      * 实现彻底跨域下载
      */
     window.forceDownload = async function (directUrl, ext, needsMerge, formatId, origUrl, btnElement) {
         const originalText = btnElement.innerText;
+        const accessCode = await getAccessCode();
+        if (!accessCode) return;
+
         btnElement.innerText = "Downloading...";
         btnElement.style.pointerEvents = "none";
         btnElement.style.opacity = "0.7";
@@ -551,14 +832,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 apiEndpoint = '/api/download_merged?url=' + encodeURIComponent(origUrl) + '&format_id=' + encodeURIComponent(formatId);
             }
 
-            const response = await fetch(apiEndpoint);
+            const response = await fetch(apiEndpoint, { headers: { 'X-Access-Code': accessCode } });
             if (!response.ok) {
-                if (!needsMerge && directUrl) {
-                    window.open(directUrl, '_blank');
-                    throw new Error("Proxy error, opening in new tab");
-                } else {
-                    throw new Error("Server Merge Failed");
+                const message = await readError(response);
+                if (response.status === 401) {
+                    clearAccessCode();
                 }
+                throw new Error(message);
             }
             const blob = await response.blob();
             const objectUrl = URL.createObjectURL(blob);
@@ -571,6 +851,7 @@ document.addEventListener('DOMContentLoaded', () => {
             URL.revokeObjectURL(objectUrl);
         } catch (err) {
             console.warn(err);
+            showError(err.message || 'Download failed.');
         } finally {
             btnElement.innerText = originalText;
             btnElement.style.pointerEvents = "auto";
